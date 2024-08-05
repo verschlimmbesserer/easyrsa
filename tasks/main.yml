@@ -1,0 +1,72 @@
+---
+
+- name: Install easyrsa from ubuntu repos
+  ansible.builtin.apt:
+    package: easy-rsa
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: result
+  until: result is successful
+
+- name: Create easyrsa dir
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ ca_user }}"
+    group: "{{ ca_group }}"
+    mode: "0700"
+  loop: "{{ dirs }}"
+
+- name: Create symlink
+  block:
+
+    - name: Get all files in /usr/share/easy-rsa
+      ansible.builtin.find:
+        paths: "/usr/share/easy-rsa/"
+        recurse: true
+      register: find
+
+    - name: Create links for files
+      ansible.builtin.file:
+        src: "{{ item.path }}"
+        dest: "{{ homedir }}/easy-rsa/{{ item.path | basename }}"
+        owner: "{{ ca_user }}"
+        group: "{{ ca_group }}"
+        state: link
+      loop: "{{ find.files }}"
+
+- name: Check if pki exists
+  ansible.builtin.stat:
+    path: "{{ homedir }}/easy-rsa/pki"
+  register: pki
+
+- name: Init pki
+  ansible.builtin.shell:
+    cmd: ./easyrsa init-pki
+    chdir: "{{ homedir }}/easy-rsa/"
+  when: not pki.stat.exists
+  register: initpki
+  changed_when: initpki.rc != 0
+
+- name: Deploy vars
+  ansible.builtin.template:
+    src: vars.j2
+    dest: "{{ homedir }}/easy-rsa/vars"
+
+- name: Ensure all files in easy-rsa dir belong to defined user
+  ansible.builtin.file:
+    path: "{{ homedir }}/easy-rsa/"
+    owner: "{{ ca_user }}"
+    group: "{{ ca_group }}"
+    recurse: true
+
+- name: Case insensitive password string match
+  ansible.builtin.expect:
+    command: ./easyrsa build-ca
+    chdir: "{{ homedir }}/easy-rsa/"
+    responses:
+      (?i)Passphrase: "{{ ca_password }}"
+      (?i)Name: "{{ ca_common_name }}"
+  when: initpki is changed
+  no_log: true

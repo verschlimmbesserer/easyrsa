@@ -1,0 +1,7 @@
+---
+
+- name: Start graylog
+  ansible.builtin.systemd:
+    name: graylog-server
+    enabled: true
+    state: started
